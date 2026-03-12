@@ -15,7 +15,7 @@ DeepRecall 是 OpenClaw 的一套完整记忆操作系统，涵盖了**数据摄
 DeepRecall 通过三个集成阶段管理 Agent 的记忆：
 
 1.  **记忆摄取 (Summarizer):** - 自动扫描 `memory/*.md` 会话文件。
-    - 自动从 `openclaw.json` 读取配置，调用 LLM (DeepSeek, Qwen 等) 将原始日志提炼为结构化 L1 事实。
+    - 自动从 `openclaw.json` 读取配置，调用 LLM 将原始日志提炼为结构化 L1 事实。
     - 同步原始内容至本地 L2 SQLite 归档。
 2.  **记忆检索 (Engine):**
     - Agent 通过 `search_memory_db` 快速锁定 L1 指针。
