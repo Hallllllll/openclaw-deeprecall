@@ -1,69 +1,59 @@
 # 🧠 DeepRecall for OpenClaw
 
-> **A 100% local, SQLite-powered L1/L2 memory engine. Stop vector-search token bloat with a two-tier "Index & Deep Dive" architecture.**
+> **The first full-lifecycle memory management system for AI Agents. Local, SQLite-powered, and LLM-integrated.**
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
 [![OpenClaw Compatible](https://img.shields.io/badge/OpenClaw-Skill-blue.svg)](#)
 [![Local First](https://img.shields.io/badge/Privacy-100%25_Local-success.svg)](#)
-[![Zero Config](https://img.shields.io/badge/Setup-Zero_Config-orange.svg)](#)
+[![LLM Summarizer](https://img.shields.io/badge/LLM-Summarizer_Integrated-blueviolet.svg)](#)
 
-## 🛑 The Problem
+DeepRecall is a complete memory OS for OpenClaw that handles **Ingestion (L1/L2), Precise Retrieval, and Context Optimization (Read-and-Burn)**.
 
-Most memory plugins for AI Agents either rely on cloud SaaS (compromising privacy) or use naive Vector Search that dumps massive chunks of raw Markdown into your context window. This leads to **severe context pollution, high token costs, and LLM hallucination**.
+## 🔄 The Full Lifecycle Workflow
 
-## ⚡️ The Solution: L1/L2 Architecture
+DeepRecall manages your Agent's memory through three integrated stages:
 
-DeepRecall brings CPU-style memory caching to LLM Agents:
+1.  **Ingestion (Summarizer):**
+    - Automatically scans `memory/*.md` files.
+    - Uses your preferred LLM (DeepSeek, Qwen, etc.) via `openclaw.json` to distill raw logs into structured L1 facts.
+    - Synchronizes original content to the L2 SQLite archive.
+2.  **Retrieval (Engine):**
+    - The Agent searches L1 facts via `search_memory_db` to find pointers.
+    - If details are needed, it performs a surgical deep dive into L2 via `read_archive_db`.
+3.  **Optimization (Read-and-Burn):**
+    - Purges temporary raw files post-extraction to keep the context window 100% lean.
 
-* **L1 Cache (Structured Facts):** A highly compressed SQLite table storing only distilled facts and file pointers. This acts as your Agent's "daily context" at a fraction of the token cost.
-* **L2 Archive (Raw Context):** The complete original conversation/code files. The Agent is strictly instructed to **never** scan L2 directly. It only dives into L2 when it finds an exact `source_file` pointer in L1.
-* 🔥 **Read-and-Burn Mechanism:** Once the Agent extracts the specific lines (e.g., an exact code snippet) from the L2 archive, it immediately releases the massive raw file from the active context window.
 
-## 📸 See It In Action (Execution Trace)
 
-Here is a real internal execution trace of an Agent using DeepRecall to cross-reference a bug from a previous week:
+## 📸 Execution Trace (Dual-Tier Precision)
 
-> Agent Request: "Find the 3 causes of Vue silent failures, and extract the exact sandbox error code with variable interpolation from last week."
+> Agent: "Retrieve the Vue sandbox error code from last week."
 
-[System] Initiating DeepRecall L1/L2 Retrieval Engine...
+[0.01s] 🧠 Logic: Scanning L1 facts for "Vue sandbox"...
+[0.02s] ⚡️ L1 HIT: [2026-03-06-dead-code.md] contains specific sandbox error.
+[0.08s] 🔍 L2 DIVE: Extracting exact code from archive...
+[0.09s] 🔥 READ-AND-BURN: Purging "2026-03-06-dead-code.md" from active context.
+[0.10s] ✅ Success: Token Savings: ~15,420 tokens.
+🚀 Key Features
+Multi-LLM Summarizer: Native support for DeepSeek, Qwen, and OpenAI-compatible providers via openclaw.json.
 
-[0.02s] ⚡️ L1 CACHE HIT (Structured Facts)
-> Tool: search_memory_db(query="Vue silent failure OR sandbox error", limit=5)
-  ├─ Fact 1: [2026-03-05 | learnings | pointer: 2026-03-05-vue-render.md] 
-  │  Causes: missing setup return, unclosed tags, v-if logic error.
-  └─ Fact 2: [2026-03-06 | learnings | pointer: 2026-03-06-dead-code.md] 
-     Sandbox validation failed after 3 attempts. (Needs L2 for exact code)
+Data Sovereignty: All summaries and archives are stored 100% locally in SQLite.
 
-[0.08s] 🔍 L2 ARCHIVE DIVE (Raw Content)
-> Tool: read_archive_db(source_file="2026-03-06-dead-code.md")
-  └─ Extracting exact lines 215-220...
-     Code found: `await self.fail_task(task['id'], f"Sandbox validation failed after 3 attempts. Last error: {stderr[:500]}")`
+Auto-Config: Dynamically detects OPENCLAW_WORKSPACE and API settings.
 
-[0.09s] 🔥 CONTEXT MANAGEMENT
-> Action: Read-and-Burn
-> Status: Releasing "2026-03-06-dead-code.md" from active context window.
-  └─ Token Savings: ~15,420 tokens reclaimed. 
-
-[0.10s] ✅ DeepRecall routine complete. Firing response to user...
-🚀 Features
-
-Zero-Config Self-Bootstrapping: Just install the skill. It automatically creates the SQLite database, builds the schema, and maintains its own state.
-
-Extreme Token Efficiency: Formatted to strip out redundant metadata before feeding it to the LLM.
+Zero Hallucination: Surgical pointers prevent "Lost in the Middle" errors.
 
 📦 Installation
-To install DeepRecall globally into your OpenClaw environment, simply run:
 
 ```bash
 clawhub install deeprecall
 ```
 
-🛠️ Tools Registered
-Once installed, your Agent automatically gains access to:
+🛠️ Integrated Tools
 
-search_memory_db(query: str, limit: int) - For L1 semantic and keyword lookups.
+summarize_memory_files: Triggers the LLM to process raw logs into the DB.
 
-read_archive_db(source_file: str) - For precise L2 raw data extraction guided by L1 pointers.
+search_memory_db: Semantic/keyword search for L1 facts.
 
-Built with ❤️ for the OpenClaw Community.
+read_archive_db: Precise L2 raw content extraction.
