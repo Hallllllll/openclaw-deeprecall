@@ -56,8 +56,9 @@ Extreme Token Efficiency: Formatted to strip out redundant metadata before feedi
 📦 Installation
 To install DeepRecall globally into your OpenClaw environment, simply run:
 
-Bash
+```bash
 clawhub install deeprecall
+```
 
 🛠️ Tools Registered
 Once installed, your Agent automatically gains access to:
