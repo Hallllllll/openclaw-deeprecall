@@ -125,9 +125,111 @@ DeepRecall features zero-config deployment:
 ## Files
 
 - `scripts/memory_retriever.py` - Core retrieval engine with cleanup
-- `scripts/memory_db_tool.py` - CLI interface with cleanup command
+- `scripts/memory_db_tool.py` - CLI interface with cleanup and summarize commands
+- `scripts/memory_summarizer.py` - LLM-powered fact extraction engine
+- `config.example.json` - Example configuration file
+- `manifest.json` - ClawHub skill manifest
 - `memory.db` - Permanent SQLite database (per-agent, auto-created)
 - `*.md` - Temporary session files (auto-cleaned)
+
+## Advanced Configuration
+
+### LLM Summarizer Configuration
+DeepRecall Summarizer automatically reads configuration from OpenClaw's `openclaw.json`. You can customize its behavior by creating a `config.json` file:
+
+1. **Copy the example configuration**:
+   ```bash
+   cp config.example.json config.json
+   ```
+
+2. **Edit `config.json`** to specify:
+   - `preferred_provider`: Provider name from OpenClaw configuration (e.g., "deepseek-reasoner")
+   - `preferred_model`: Specific model ID to use
+   - `temperature`, `max_tokens`, `timeout_seconds`: API parameters
+   - `auto_summarize_cron`: Cron expression for automatic summarization
+
+3. **Configuration file search order**:
+   - Current directory: `./config.json`
+   - Current directory: `./deeprecall_config.json`
+   - Parent directory: `../config.json`
+   - Home directory: `~/.deeprecall.json`
+
+### Model Provider Selection
+The summarizer uses this logic to select a model provider:
+1. Uses `preferred_provider` from DeepRecall config if available
+2. Otherwise auto-selects first available provider with `baseUrl` and `apiKey`
+3. Uses `preferred_model` or first available model from the provider
+4. Falls back to rule-based extraction if no API is available
+
+## Automated Scheduling with OpenClaw Cron
+
+For automatic daily summarization and cleanup, configure OpenClaw cron jobs:
+
+### 1. Daily Summarization (Recommended: 2 AM)
+```bash
+# Schedule automatic summarization
+openclaw cron add --name "deeprecall-summarize-daily" \
+  --cron "0 2 * * *" \
+  --session isolated \
+  --message "Please execute: python3 /path/to/DeepRecall/scripts/memory_db_tool.py summarize --process-all" \
+  --description "Daily automatic summarization of memory files"
+```
+
+### 2. Daily Cleanup (Recommended: 3 AM)
+```bash
+# Schedule automatic cleanup  
+openclaw cron add --name "deeprecall-cleanup-daily" \
+  --cron "0 3 * * *" \
+  --session isolated \
+  --message "Please execute: python3 /path/to/DeepRecall/scripts/memory_db_tool.py cleanup" \
+  --description "Daily cleanup of raw .md files (retains database)"
+```
+
+### 3. Combined Task (Single Cron)
+```bash
+# Single cron for both summarization and cleanup
+openclaw cron add --name "deeprecall-daily-maintenance" \
+  --cron "0 2 * * *" \
+  --session isolated \
+  --message "Please execute: python3 /path/to/DeepRecall/scripts/memory_db_tool.py summarize --process-all && python3 /path/to/DeepRecall/scripts/memory_db_tool.py cleanup" \
+  --description "Daily DeepRecall maintenance (summarize + cleanup)"
+```
+
+### 4. Verify Cron Jobs
+```bash
+# List all cron jobs
+openclaw cron list
+
+# Test a cron job
+openclaw cron run <job-id>
+
+# View execution history
+openclaw cron runs --id <job-id>
+```
+
+## Installation & Setup Guide
+
+### Quick Start
+```bash
+# 1. Install the skill
+clawhub install deeprecall
+
+# 2. Test configuration
+python3 scripts/memory_db_tool.py summarize --test-config
+
+# 3. Process existing memories
+python3 scripts/memory_db_tool.py summarize --process-all
+
+# 4. Schedule daily automation (optional but recommended)
+# Follow the cron configuration above
+```
+
+### Post-Installation Checklist
+- [ ] Verify OpenClaw has LLM provider configuration in `openclaw.json`
+- [ ] Test summarizer with `--test-config` flag
+- [ ] Process existing memory files with `--process-all`
+- [ ] Configure cron jobs for automation
+- [ ] Verify cleanup settings (default: 1 day retention, 250KB max)
 
 ## Notes
 

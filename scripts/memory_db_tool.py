@@ -166,19 +166,51 @@ def main():
             summarizer = DeepRecallSummarizer()
             
             if args.test_config:
-                # Test configuration
-                config = summarizer._get_openclaw_config()
-                print("OpenClaw Configuration Test:")
-                print(f"Providers found: {list(config.keys())}")
+                # Test configuration using summarizer's logic
+                print("=== DeepRecall Configuration Test ===\n")
                 
-                for provider_name, provider_config in config.items():
-                    print(f"\n{provider_name}:")
-                    print(f"  baseUrl: {provider_config.get('baseUrl', 'Not set')}")
-                    print(f"  apiKey: {'Set' if provider_config.get('apiKey') else 'Not set'}")
-                    models = provider_config.get("models", [])
-                    print(f"  models: {len(models)} model(s)")
-                    for model in models[:3]:
-                        print(f"    - {model.get('id', 'Unknown')}")
+                # Get OpenClaw configuration
+                openclaw_config = summarizer._get_openclaw_config()
+                print("1. OpenClaw Model Providers:")
+                print(f"   Found {len(openclaw_config)} provider(s)")
+                
+                available_providers = []
+                for provider_name, provider_config in openclaw_config.items():
+                    has_base_url = "baseUrl" in provider_config
+                    has_api_key = bool(provider_config.get("apiKey"))
+                    status = "✅ Available" if has_base_url and has_api_key else "⚠️  Incomplete"
+                    
+                    print(f"\n   {provider_name}: {status}")
+                    if has_base_url:
+                        print(f"      baseUrl: {provider_config.get('baseUrl')}")
+                    
+                    if has_base_url and has_api_key:
+                        available_providers.append(provider_name)
+                
+                # Get DeepRecall configuration
+                deeprecall_config = summarizer.config
+                print("\n2. DeepRecall Configuration:")
+                
+                if deeprecall_config.get("summarizer"):
+                    print("   ✅ Custom configuration loaded")
+                    for key, value in deeprecall_config.get("summarizer", {}).items():
+                        print(f"      {key}: {value}")
+                else:
+                    print("   ℹ️  Using default configuration")
+                
+                # Show provider selection
+                print("\n3. Provider Selection:")
+                if available_providers:
+                    print(f"   Available providers: {available_providers}")
+                    print("   Selection priority:")
+                    print("     1. preferred_provider from DeepRecall config")
+                    print("     2. First available provider with baseUrl and apiKey")
+                    print("     3. Rule-based extraction (fallback)")
+                else:
+                    print("   ❌ No available providers")
+                    print("   ⚠️  Summarizer will use rule-based extraction")
+                
+                print("\n=== Configuration Test Complete ===")
             
             elif args.process_all:
                 store_raw = not args.no_store_raw

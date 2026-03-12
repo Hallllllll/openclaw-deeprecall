@@ -40,6 +40,9 @@ class DeepRecallSummarizer:
         # Get workspace memory directory for raw files
         self.memory_dir = get_workspace_memory_dir()
         
+        # Load DeepRecall configuration
+        self.config = self._get_deeprecall_config()
+        
         # Processing statistics
         self.stats = {
             "files_processed": 0,
@@ -138,6 +141,55 @@ Now analyze the following memory content:
             print(f"Error reading OpenClaw config: {e}")
             return {}
     
+    def _get_deeprecall_config(self) -> Dict:
+        """
+        Read DeepRecall configuration from config files.
+        Returns DeepRecall-specific configuration.
+        """
+        try:
+            # Try to find DeepRecall configuration in common locations
+            possible_paths = [
+                Path.cwd() / "config.json",
+                Path.cwd() / "deeprecall_config.json",
+                Path.cwd().parent / "config.json",
+                Path(self.memory_dir).parent / "config.json",
+                Path.home() / ".deeprecall.json"
+            ]
+            
+            config_path = None
+            for path in possible_paths:
+                if path.exists():
+                    config_path = path
+                    print(f"Found DeepRecall config at: {path}")
+                    break
+            
+            if not config_path:
+                # Return default configuration
+                return {
+                    "summarizer": {
+                        "preferred_provider": None,  # Auto-select first available
+                        "preferred_model": None,     # Auto-select first model
+                        "max_content_length": 6000,
+                        "temperature": 0.1,
+                        "max_tokens": 4000,
+                        "timeout_seconds": 180,
+                        "store_raw_content": True
+                    }
+                }
+            
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            # Return deeprecall section or full config
+            return config.get("deeprecall", config)
+            
+        except json.JSONDecodeError as e:
+            print(f"Warning: Invalid JSON in DeepRecall config: {e}, using defaults")
+            return {"summarizer": {}}
+        except Exception as e:
+            print(f"Warning: Error reading DeepRecall config: {e}, using defaults")
+            return {"summarizer": {}}
+    
     async def extract_facts_with_llm(self, content: str) -> List[Dict]:
         """
         Extract structured facts from content using LLM API.
@@ -156,20 +208,27 @@ Now analyze the following memory content:
             # Get API configuration from OpenClaw config
             providers = self._get_openclaw_config()
             
-            # Try DeepSeek first, then Qwen, then any OpenAI-compatible provider
-            api_config = None
-            for provider_name in ["deepseek-reasoner", "qwen"]:
-                if provider_name in providers:
-                    api_config = providers[provider_name]
-                    provider_key = provider_name
-                    break
+            # Get preferred provider from DeepRecall configuration
+            summarizer_config = self.config.get("summarizer", {})
+            preferred_provider = summarizer_config.get("preferred_provider")
+            preferred_model = summarizer_config.get("preferred_model")
             
-            # Fallback: look for any provider with baseUrl and apiKey
-            if not api_config:
+            # Select provider based on configuration
+            api_config = None
+            provider_key = None
+            
+            if preferred_provider and preferred_provider in providers:
+                # Use configured preferred provider
+                api_config = providers[preferred_provider]
+                provider_key = preferred_provider
+                print(f"Using configured preferred provider: {preferred_provider}")
+            else:
+                # Auto-select first available provider with baseUrl and apiKey
                 for name, config in providers.items():
-                    if "baseUrl" in config and "apiKey" in config:
+                    if "baseUrl" in config and config.get("apiKey"):
                         api_config = config
                         provider_key = name
+                        print(f"Auto-selected provider: {name}")
                         break
             
             if not api_config:
@@ -185,12 +244,31 @@ Now analyze the following memory content:
             
             # Get model ID from provider config
             models = api_config.get("models", [])
-            model_id = "deepseek-reasoner"  # Default
-            if models and len(models) > 0:
-                model_id = models[0].get("id", model_id)
+            model_id = None
             
-            # Build complete prompt
-            full_prompt = self.extraction_prompt_template + "\n" + content[:6000]  # Limit length
+            if preferred_model:
+                # Try to find the preferred model in provider's model list
+                for model in models:
+                    if model.get("id") == preferred_model:
+                        model_id = preferred_model
+                        break
+            
+            # If no preferred model or not found, use first available model
+            if not model_id and models and len(models) > 0:
+                model_id = models[0].get("id")
+            
+            if not model_id:
+                print("Warning: No model configured in provider, using rule-based extraction")
+                return await self._extract_facts_with_rules(content)
+            
+            # Get configuration parameters
+            max_content_length = summarizer_config.get("max_content_length", 6000)
+            temperature = summarizer_config.get("temperature", 0.1)
+            max_tokens = summarizer_config.get("max_tokens", 4000)
+            timeout_seconds = summarizer_config.get("timeout_seconds", 180)
+            
+            # Build complete prompt with length limit
+            full_prompt = self.extraction_prompt_template + "\n" + content[:max_content_length]
             
             # Prepare API request
             headers = {
@@ -203,17 +281,18 @@ Now analyze the following memory content:
                 "messages": [
                     {"role": "user", "content": full_prompt}
                 ],
-                "temperature": 0.1,
-                "max_tokens": 4000,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
                 "response_format": {"type": "json_object"}
             }
             
             print(f"Calling LLM API to extract facts, content length: {len(content)} characters")
             print(f"API endpoint: {base_url}/chat/completions")
             print(f"Using provider: {provider_key}, model: {model_id}")
+            print(f"Configuration: temp={temperature}, max_tokens={max_tokens}, timeout={timeout_seconds}s")
             
-            # Send async request with 180-second timeout
-            timeout = aiohttp.ClientTimeout(total=180)
+            # Send async request with configured timeout
+            timeout = aiohttp.ClientTimeout(total=timeout_seconds)
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -626,18 +705,73 @@ def main():
     
     if args.test_config:
         # Test configuration
-        config = summarizer._get_openclaw_config()
-        print("\nOpenClaw Configuration Test:")
-        print(f"Providers found: {list(config.keys())}")
+        print("\n=== DeepRecall Configuration Test ===\n")
         
-        for provider_name, provider_config in config.items():
-            print(f"\n  {provider_name}:")
-            print(f"    baseUrl: {provider_config.get('baseUrl', 'Not set')}")
-            print(f"    apiKey: {'Set' if provider_config.get('apiKey') else 'Not set'}")
+        # Test OpenClaw configuration
+        openclaw_config = summarizer._get_openclaw_config()
+        print("1. OpenClaw Model Providers:")
+        print(f"   Found {len(openclaw_config)} provider(s)")
+        
+        available_providers = []
+        for provider_name, provider_config in openclaw_config.items():
+            has_base_url = "baseUrl" in provider_config
+            has_api_key = bool(provider_config.get("apiKey"))
             models = provider_config.get("models", [])
-            print(f"    models: {len(models)} model(s)")
-            for model in models[:3]:  # Show first 3 models
-                print(f"      - {model.get('id', 'Unknown')}")
+            status = "✅ Available" if has_base_url and has_api_key else "⚠️  Incomplete"
+            
+            print(f"\n   {provider_name}: {status}")
+            if has_base_url:
+                print(f"      baseUrl: {provider_config.get('baseUrl')}")
+            if models:
+                print(f"      models: {len(models)} model(s)")
+                for model in models[:2]:
+                    print(f"        - {model.get('id', 'Unknown')}")
+                if len(models) > 2:
+                    print(f"        ... and {len(models) - 2} more")
+            
+            if has_base_url and has_api_key:
+                available_providers.append(provider_name)
+        
+        # Test DeepRecall configuration
+        print("\n2. DeepRecall Summarizer Configuration:")
+        deeprecall_config = summarizer.config.get("summarizer", {})
+        
+        if deeprecall_config:
+            print("   ✅ Custom configuration loaded")
+            for key, value in deeprecall_config.items():
+                print(f"      {key}: {value}")
+        else:
+            print("   ℹ️  Using default configuration")
+        
+        # Show provider selection logic
+        print("\n3. Provider Selection Logic:")
+        if available_providers:
+            preferred = deeprecall_config.get("preferred_provider")
+            if preferred:
+                if preferred in available_providers:
+                    print(f"   ✅ Will use configured provider: {preferred}")
+                else:
+                    print(f"   ⚠️  Configured provider '{preferred}' not available")
+                    print(f"   ⚠️  Will auto-select from: {available_providers}")
+            else:
+                print(f"   ℹ️  No preferred provider configured")
+                print(f"   ℹ️  Will auto-select from: {available_providers}")
+            
+            # Show what would be selected
+            if preferred and preferred in available_providers:
+                selected = preferred
+            elif available_providers:
+                selected = available_providers[0]
+            else:
+                selected = None
+            
+            if selected:
+                print(f"   📍 Selected provider would be: {selected}")
+        else:
+            print("   ❌ No available providers found")
+            print("   ⚠️  Summarizer will use rule-based extraction")
+        
+        print("\n=== Configuration Test Complete ===")
     
     elif args.process_all:
         # Process all files
