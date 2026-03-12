@@ -16,7 +16,7 @@ DeepRecall manages your Agent's memory through three integrated stages:
 
 1.  **Ingestion (Summarizer):**
     - Automatically scans `memory/*.md` files.
-    - Uses your preferred LLM (DeepSeek, Qwen, etc.) via `openclaw.json` to distill raw logs into structured L1 facts.
+    - Uses your preferred LLM via `openclaw.json` to distill raw logs into structured L1 facts.
     - Synchronizes original content to the L2 SQLite archive.
 2.  **Retrieval (Engine):**
     - The Agent searches L1 facts via `search_memory_db` to find pointers.
