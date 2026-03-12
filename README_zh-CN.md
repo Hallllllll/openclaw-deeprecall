@@ -58,8 +58,9 @@ DeepRecall 为大语言模型 Agent 引入了类似 CPU 多级缓存的记忆机
 📦 安装指南
 在你的 OpenClaw 环境中全局安装 DeepRecall，只需执行：
 
-Bash
+```bash
 clawhub install deeprecall
+```
 
 🛠️ 注册工具
 安装完成后，你的 Agent 会自动获得以下两个工具的访问权限：
