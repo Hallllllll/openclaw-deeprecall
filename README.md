@@ -35,8 +35,10 @@ DeepRecall manages your Agent's memory through three integrated stages:
 [0.08s] 🔍 L2 DIVE: Extracting exact code from archive...
 [0.09s] 🔥 READ-AND-BURN: Purging "2026-03-06-dead-code.md" from active context.
 [0.10s] ✅ Success: Token Savings: ~15,420 tokens.
+
 🚀 Key Features
-Multi-LLM Summarizer: Native support for DeepSeek, Qwen, and OpenAI-compatible providers via openclaw.json.
+
+OpenAI-Compatible Integration: Native support for any OpenAI-standard API. Seamlessly integrate your preferred LLM for automated indexing.
 
 Data Sovereignty: All summaries and archives are stored 100% locally in SQLite.
 
