@@ -69,12 +69,37 @@
       },
       "returns": "object",
       "implementation": "scripts.memory_retriever.cleanup_raw_files"
+    },
+    "summarize_memory_files": {
+      "description": "Summarize raw memory files using LLM and store structured facts to database. Requires OpenClaw configuration with LLM API provider.",
+      "parameters": {
+        "process_all": {
+          "type": "boolean",
+          "description": "Process all unprocessed memory files",
+          "required": false,
+          "default": false
+        },
+        "process_file": {
+          "type": "string",
+          "description": "Process a specific memory file (relative to memory directory)",
+          "required": false
+        },
+        "no_store_raw": {
+          "type": "boolean",
+          "description": "Do not store raw content to L2 archive",
+          "required": false,
+          "default": false
+        }
+      },
+      "returns": "object",
+      "implementation": "scripts.memory_summarizer.DeepRecallSummarizer.process_all_files"
     }
   },
   "dependencies": [],
   "requirements": [
     "python3",
-    "sqlite3"
+    "sqlite3",
+    "aiohttp"
   ],
   "entry_points": {
     "cli": "scripts/memory_db_tool.py"

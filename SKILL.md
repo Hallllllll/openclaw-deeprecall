@@ -6,6 +6,7 @@
    - `search_memory_db(query: str, limit: int)`: Semantic search over L1 structured facts
    - `read_archive_db(source_file: str)`: Retrieve exact raw content from L2 archive
    - `cleanup_raw_files(retention_days: int, max_size_kb: int, dry_run: bool)`: Clean raw .md files while preserving database
+   - `summarize_memory_files(process_all: bool, process_file: str, no_store_raw: bool)`: Summarize raw files using LLM and store to database
 
 2. **Apply Retrieval Protocol**:
    - For any query about prior work, decisions, dates, people, preferences, or todos:
@@ -43,6 +44,13 @@ Cleans up raw .md session files while preserving database.
 - **max_size_kb**: Maximum total file size in KB (default: 250)
 - **dry_run**: Preview without deleting (default: False)
 
+### `summarize_memory_files(process_all: bool, process_file: str, no_store_raw: bool)`
+Summarize raw memory files using LLM and store structured facts to database.
+- **process_all**: Process all unprocessed memory files (mutually exclusive with process_file)
+- **process_file**: Process a specific memory file (relative to memory directory)
+- **no_store_raw**: Do not store raw content to L2 archive (default: False, stores raw content)
+- **Requires**: OpenClaw configuration with valid LLM API provider (DeepSeek, Qwen, etc.)
+
 ## Usage
 
 ```bash
@@ -58,6 +66,12 @@ python3 scripts/memory_db_tool.py stats
 # Cleanup raw files (dry-run first)
 python3 scripts/memory_db_tool.py cleanup --dry-run
 python3 scripts/memory_db_tool.py cleanup --retention-days 1 --max-size-kb 250
+
+# Summarize memory files using LLM
+python3 scripts/memory_db_tool.py summarize --test-config
+python3 scripts/memory_db_tool.py summarize --process-all
+python3 scripts/memory_db_tool.py summarize --process-file "2024-01-01-daily-log.md"
+python3 scripts/memory_db_tool.py summarize --process-all --no-store-raw
 ```
 
 ## Database Schema

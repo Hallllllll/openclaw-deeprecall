@@ -86,6 +86,17 @@ def main():
     cleanup_parser.add_argument("--memory-dir", type=str,
                                help="Custom memory directory path (default: auto-detect)")
     
+    # summarize command
+    summarize_parser = subparsers.add_parser("summarize", help="Summarize memory files using LLM")
+    summarize_parser.add_argument("--process-all", action="store_true",
+                                 help="Process all unprocessed memory files")
+    summarize_parser.add_argument("--process-file", type=str,
+                                 help="Process a specific memory file")
+    summarize_parser.add_argument("--no-store-raw", action="store_true",
+                                 help="Do not store raw content to L2 archive")
+    summarize_parser.add_argument("--test-config", action="store_true",
+                                 help="Test OpenClaw configuration and API connectivity")
+    
     args = parser.parse_args()
     
     if args.command == "search":
@@ -145,6 +156,67 @@ def main():
                         print(f"    ... and {len(result['deleted_files']) - 10} more")
         else:
             print(f"  Error: {result.get('reason', 'Unknown error')}")
+    
+    elif args.command == "summarize":
+        # Import summarizer and run async function
+        try:
+            from memory_summarizer import DeepRecallSummarizer
+            import asyncio
+            
+            summarizer = DeepRecallSummarizer()
+            
+            if args.test_config:
+                # Test configuration
+                config = summarizer._get_openclaw_config()
+                print("OpenClaw Configuration Test:")
+                print(f"Providers found: {list(config.keys())}")
+                
+                for provider_name, provider_config in config.items():
+                    print(f"\n{provider_name}:")
+                    print(f"  baseUrl: {provider_config.get('baseUrl', 'Not set')}")
+                    print(f"  apiKey: {'Set' if provider_config.get('apiKey') else 'Not set'}")
+                    models = provider_config.get("models", [])
+                    print(f"  models: {len(models)} model(s)")
+                    for model in models[:3]:
+                        print(f"    - {model.get('id', 'Unknown')}")
+            
+            elif args.process_all:
+                store_raw = not args.no_store_raw
+                print(f"Processing all files (store_raw: {store_raw})...")
+                stats = asyncio.run(summarizer.process_all_files(store_raw=store_raw))
+                print("\nSummarization Complete:")
+                print(f"  Files processed: {stats['files_processed']}")
+                print(f"  Facts extracted: {stats['facts_extracted']}")
+                print(f"  Facts stored: {stats['facts_stored']}")
+                print(f"  Raw content stored: {stats['raw_content_stored']}")
+            
+            elif args.process_file:
+                store_raw = not args.no_store_raw
+                print(f"Processing file: {args.process_file} (store_raw: {store_raw})...")
+                import asyncio
+                from pathlib import Path
+                
+                file_path = Path(args.process_file)
+                if not file_path.is_absolute():
+                    file_path = Path(summarizer.memory_dir) / file_path
+                
+                success = asyncio.run(summarizer.process_single_file(file_path, store_raw))
+                if success:
+                    print("File processed successfully")
+                else:
+                    print("File processing failed")
+                    sys.exit(1)
+            
+            else:
+                print("Please specify an action for summarize command:")
+                print("  --process-all     Process all unprocessed files")
+                print("  --process-file    Process a specific file")
+                print("  --test-config     Test OpenClaw configuration")
+        
+        except ImportError as e:
+            print(f"Error importing summarizer: {e}")
+            print("Make sure memory_summarizer.py is in the same directory")
+            sys.exit(1)
     
     else:
         parser.print_help()
