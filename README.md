@@ -47,7 +47,6 @@ Here is a real internal execution trace of an Agent using DeepRecall to cross-re
 
 [0.10s] ✅ DeepRecall routine complete. Firing response to user...
 🚀 Features
-100% Local Privacy: No API keys, no cloud syncing. Everything stays on your machine.
 
 Zero-Config Self-Bootstrapping: Just install the skill. It automatically creates the SQLite database, builds the schema, and maintains its own state.
 
