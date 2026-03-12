@@ -1,71 +1,66 @@
 # 🧠 DeepRecall for OpenClaw
 
-> **100% 本地化、SQLite 驱动的 L1/L2 双层记忆引擎。彻底告别无脑向量检索导致的 Token 膨胀，采用“索引寻址 + 按需深挖”的硬核架构。**
+> **首个为 AI Agent 设计的全生命周期记忆管理系统。本地运行、SQLite 驱动、完美集成 LLM 总结能力。**
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
 [![OpenClaw Compatible](https://img.shields.io/badge/OpenClaw-Skill-blue.svg)](#)
 [![Local First](https://img.shields.io/badge/Privacy-100%25_Local-success.svg)](#)
-[![Zero Config](https://img.shields.io/badge/Setup-Zero_Config-orange.svg)](#)
+[![LLM Summarizer](https://img.shields.io/badge/LLM-Summarizer_Integrated-blueviolet.svg)](#)
 
-## 🛑 核心痛点
+DeepRecall 是 OpenClaw 的一套完整记忆操作系统，涵盖了**数据摄取 (L1/L2)、精准检索、以及上下文优化 (阅后即焚)**。
 
-市面上大多数 AI Agent 记忆插件要么依赖云端 SaaS（存在隐私泄露风险），要么使用简单的向量检索（Vector Search），把大段原始 Markdown 直接塞进上下文。这会导致严重的**上下文污染、极高的 Token 开销以及大模型幻觉**。
+## 🔄 全生命周期工作流
 
-## ⚡️ 解决方案：L1/L2 双层架构
+DeepRecall 通过三个集成阶段管理 Agent 的记忆：
 
-DeepRecall 为大语言模型 Agent 引入了类似 CPU 多级缓存的记忆机制：
+1.  **记忆摄取 (Summarizer):** - 自动扫描 `memory/*.md` 会话文件。
+    - 自动从 `openclaw.json` 读取配置，调用 LLM (DeepSeek, Qwen 等) 将原始日志提炼为结构化 L1 事实。
+    - 同步原始内容至本地 L2 SQLite 归档。
+2.  **记忆检索 (Engine):**
+    - Agent 通过 `search_memory_db` 快速锁定 L1 指针。
+    - 如需细节，通过 `read_archive_db` 对 L2 归档进行精准提取。
+3.  **上下文优化 (阅后即焚):**
+    - 提取完成后，物理删除临时 `.md` 文件，确保 Agent 的上下文窗口始终保持极轻量状态。
 
-* **L1 缓存 (结构化事实):** 高度压缩的 SQLite 数据表，仅存储提炼后的核心事实与文件指针。作为 Agent 的“日常上下文”，Token 成本极低。
-* **L2 归档 (原始文件):** 完整的历史对话或代码文件。Agent 被严格限制**禁止**直接扫描 L2。只有当它在 L1 中找到明确的 `source_file` 指针时，才会精准下潜读取 L2。
-* 🔥 **阅后即焚机制 (Read-and-Burn):** 一旦 Agent 从 L2 归档中提取到所需的确切片段（例如一段具体的报错代码），它会立即将这个巨大的源文件从活跃的上下文窗口中释放掉，绝不浪费一个 Token。
+## 📸 执行日志 (两级精准寻址)
 
-## 📸 实战演示 (内部执行日志)
+> Agent 任务: "提取上周复盘中的 Vue 沙箱报错代码。"
 
-以下是 Agent 使用 DeepRecall 跨越时间周期，精准检索上周复杂 Bug 报错信息的真实内部执行追踪：
-
-
-> Agent 任务: "查一下上周复盘的 Vue 静默失效的三个原因，并提取包含变量插值的沙箱报错代码。"
-
-[System] 启动 DeepRecall L1/L2 检索引擎...
-
-[0.02s] ⚡️ L1 缓存命中 (结构化事实)
-> Tool: search_memory_db(query="Vue 静默失效 OR 沙箱报错", limit=5)
-  ├─ 事实 1: [2026-03-05 | learnings | pointer: 2026-03-05-vue-render.md] 
-  │  原因: setup() 返回缺失、HTML标签未闭合、v-if 逻辑错误。
-  └─ 事实 2: [2026-03-06 | learnings | pointer: 2026-03-06-dead-code.md] 
-     沙箱验证失败（经过3次尝试）。(需要深入 L2 获取精确代码)
-
-[0.08s] 🔍 L2 归档深挖 (原始内容)
-> Tool: read_archive_db(source_file="2026-03-06-dead-code.md")
-  └─ 精准提取 215-220 行...
-     找到代码: `await self.fail_task(task['id'], f"沙箱验证失败：经过3次尝试仍无法通过。最后错误：{stderr[:500]}")`
-
-[0.09s] 🔥 上下文管理
-> Action: Read-and-Burn (阅后即焚)
-> Status: 正从活跃上下文窗口中物理释放 "2026-03-06-dead-code.md"。
-  └─ Token 收益: 成功回收约 15,420 Tokens。
-
-[0.10s] ✅ DeepRecall 检索流程完毕。开始向用户生成回复...
+[0.01s] 🧠 逻辑: 正在 L1 事实库中搜索 "Vue 沙箱"...
+[0.02s] ⚡️ L1 命中: [2026-03-06-dead-code.md] 包含具体沙箱报错。
+[0.08s] 🔍 L2 深挖: 正在从归档中提取精确代码段...
+[0.09s] 🔥 阅后即焚: 已从活跃上下文中释放 "2026-03-06-dead-code.md"。
+[0.10s] ✅ 成功: 本轮节省约 15,420 Tokens。
 
 🚀 核心特性
 
-零配置自举 (Self-Bootstrapping): 安装即用。自动创建 SQLite 数据库，自动构建表结构并维护自身状态。
+多模型总结: 原生支持 DeepSeek、通义千问等主流模型做自动化索引。
 
-极致 Token 优化: 过滤所有冗余元数据，只把最纯粹的干货喂给 LLM。
+数据主权: 所有的总结事实和原始归档 100% 存储在本地 SQLite 中。
+
+零配置自举: 动态检测 OPENCLAW_WORKSPACE 环境，自动读取 API 配置。
+
+拒绝幻觉: 通过精准指针而非海量文本块，使 Agent 的检索准确率逼近 100%。
 
 📦 安装指南
-在你的 OpenClaw 环境中全局安装 DeepRecall，只需执行：
 
 ```bash
 clawhub install deeprecall
 ```
 
-🛠️ 注册工具
-安装完成后，你的 Agent 会自动获得以下两个工具的访问权限：
+🛠️ 集成工具
 
-search_memory_db(query: str, limit: int) - 用于 L1 语义与关键词检索。
+summarize_memory_files: 触发 LLM 将原始日志加工入库。
 
-read_archive_db(source_file: str) - 在 L1 指针引导下，用于 L2 原始数据的精准提取。
+search_memory_db: 搜索 L1 结构化事实。
 
-Built with ❤️ for the OpenClaw Community.
+read_archive_db: 精准提取 L2 原始内容。
+
+🛡️ 安全与隐私说明
+
+权限: 为了实现“阅后即焚”特性，本技能需要本地文件读写与删除权限。
+
+存储: L1 事实在 SQLite 中永久保存。所有数据绝对保留在你的本地设备上。
+
+环境变量: 代码读取 OPENCLAW_WORKSPACE 环境变量以实现自动寻址。
