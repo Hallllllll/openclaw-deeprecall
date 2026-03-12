@@ -57,3 +57,11 @@ summarize_memory_files: Triggers the LLM to process raw logs into the DB.
 search_memory_db: Semantic/keyword search for L1 facts.
 
 read_archive_db: Precise L2 raw content extraction.
+
+🛡️ Security & Privacy Notice
+
+Permission: This skill requires local file write/delete permissions for the "Read-and-Burn" feature.
+
+Storage: L1 facts are persistent for long-term memory. All data stays 100% on your local machine.
+
+Env Var: The code reads OPENCLAW_WORKSPACE to locate your data automatically.
