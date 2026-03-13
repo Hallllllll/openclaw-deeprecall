@@ -292,7 +292,7 @@ class MemoryRetriever:
                     if not conditions:
                         # Fallback to simple search if no valid keywords
                         conditions.append("(content LIKE ? OR tags LIKE ?)")
-                        params.extend([f'%{query}%', f'%{query}%"])
+                        params.extend([f'%{query}%', f'%{query}%'])
                     
                     where_clause = " OR ".join(conditions)
                     sql = f'''
@@ -327,7 +327,9 @@ class MemoryRetriever:
             line = f"[{date} | {clean_type} | source:{source_file}] {content}"
             formatted.append(line)
         
-        return formatted    def get_l2_raw(self, source_file: str) -> Optional[str]:
+        return formatted
+    
+    def get_l2_raw(self, source_file: str) -> Optional[str]:
         """
         Retrieve exact raw content from the L2 archive.
         
