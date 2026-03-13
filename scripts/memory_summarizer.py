@@ -210,12 +210,15 @@ Now analyze the following memory content:
         List[Dict]
             List of fact objects
         """
+        # Get configuration parameters early for use in exception handlers
+        summarizer_config = self.config.get("summarizer", {})
+        timeout_seconds = summarizer_config.get("timeout_seconds", 180)
+        
         try:
             # Get API configuration from OpenClaw config
             providers = self._get_openclaw_config()
             
             # Get preferred provider from DeepRecall configuration
-            summarizer_config = self.config.get("summarizer", {})
             preferred_provider = summarizer_config.get("preferred_provider")
             preferred_model = summarizer_config.get("preferred_model")
             
@@ -274,7 +277,6 @@ Now analyze the following memory content:
             max_content_length = summarizer_config.get("max_content_length", 6000)
             temperature = summarizer_config.get("temperature", 0.1)
             max_tokens = summarizer_config.get("max_tokens", 4000)
-            timeout_seconds = summarizer_config.get("timeout_seconds", 180)
             
             # Build complete prompt with length limit
             full_prompt = self.extraction_prompt_template + "\n" + content[:max_content_length]
@@ -344,7 +346,7 @@ Now analyze the following memory content:
                         return await self._extract_facts_with_rules(content)
                         
         except asyncio.TimeoutError:
-            print("LLM API call timeout (180 seconds), using rule-based extraction")
+            print(f"LLM API call timeout ({timeout_seconds} seconds), using rule-based extraction")
             return await self._extract_facts_with_rules(content)
         except Exception as e:
             print(f"LLM API call exception: {type(e).__name__}: {e}")
@@ -367,11 +369,26 @@ Now analyze the following memory content:
         lines = content.split('\n')
         
         # Keyword sets for classification (in priority order)
-        project_keywords = ["project", "Project", "example", "Example", "development", "Development"]
-        tech_keywords = ["api", "API", "database", "model", "config", "code", "implementation", "python", "sql"]
+        project_keywords = ["project", "example", "development"]
+        tech_keywords = ["api", "database", "model", "config", "code", "implementation", "python", "sql"]
         learning_keywords = ["learn", "error", "experience", "lesson", "improve", "mistake", "failure"]
         
+        lines_processed = False
+        
         for line in lines:
+            line = line.strip()
+            
+            # Skip empty lines and very short lines
+            if not line or len(line) < 15:
+                continue
+            
+            # Skip pure Markdown formatting lines
+            if line.startswith('#') and len(line.lstrip('#').strip()) < 10:
+                continue
+            if line in ('---', '***', '___', '```', '```json', '```python'):
+                continue
+            
+            lines_processed = True
             line_lower = line.lower()
             
             # Check categories in priority order (first match wins)
@@ -384,7 +401,7 @@ Now analyze the following memory content:
                 
                 facts.append({
                     "type": f"project_{project_name}",
-                    "content": line.strip(),
+                    "content": line,
                     "confidence": 0.8,
                     "tags": ["project"],
                     "project_name": project_name
@@ -393,7 +410,7 @@ Now analyze the following memory content:
             elif any(keyword in line_lower for keyword in tech_keywords):
                 facts.append({
                     "type": "technical",
-                    "content": line.strip(),
+                    "content": line,
                     "confidence": 0.85,
                     "tags": ["technical"]
                 })
@@ -401,19 +418,33 @@ Now analyze the following memory content:
             elif any(keyword in line_lower for keyword in learning_keywords):
                 facts.append({
                     "type": "learnings",
-                    "content": line.strip(),
+                    "content": line,
                     "confidence": 0.9,
                     "tags": ["learning"]
                 })
         
-        # If no facts extracted, add a general fact
-        if not facts and content.strip():
-            facts.append({
-                "type": "learnings",
-                "content": content[:200] + ("..." if len(content) > 200 else ""),
-                "confidence": 0.7,
-                "tags": ["general"]
-            })
+        # If no facts extracted but lines were processed, add a general fact
+        if not facts and lines_processed:
+            # Find the first non-filtered line to use as content
+            meaningful_content = ""
+            for line in lines:
+                line = line.strip()
+                if not line or len(line) < 15:
+                    continue
+                if line.startswith('#') and len(line.lstrip('#').strip()) < 10:
+                    continue
+                if line in ('---', '***', '___', '```', '```json', '```python'):
+                    continue
+                meaningful_content = line[:200] + ("..." if len(line) > 200 else "")
+                break
+            
+            if meaningful_content:
+                facts.append({
+                    "type": "learnings",
+                    "content": meaningful_content,
+                    "confidence": 0.7,
+                    "tags": ["general"]
+                })
         
         print(f"Rule-based extraction complete, obtained {len(facts)} facts")
         return facts
@@ -654,17 +685,14 @@ Now analyze the following memory content:
         """
         print(f"Starting to process all raw memory files in: {self.memory_dir}")
         
-        # Find all unprocessed .md files using database check
-        unprocessed_files = []
-        for file_path in Path(self.memory_dir).rglob("*.md"):
-            # Skip already processed files (check database)
-            if not self.retriever.is_file_processed(str(file_path)):
-                unprocessed_files.append(file_path)
+        # Use retriever's optimized batch query to get unprocessed files
+        unprocessed_file_paths = self.retriever.get_unprocessed_files(self.memory_dir)
         
-        print(f"Found {len(unprocessed_files)} unprocessed files")
+        print(f"Found {len(unprocessed_file_paths)} unprocessed files")
         
         # Process each file
-        for file_path in unprocessed_files:
+        for file_path_str in unprocessed_file_paths:
+            file_path = Path(file_path_str)
             await self.process_single_file(file_path, store_raw)
         
         # Print statistics

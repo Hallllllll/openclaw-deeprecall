@@ -354,6 +354,7 @@ class MemoryRetriever:
     def get_unprocessed_files(self, memory_dir: str) -> List[str]:
         """
         Get list of unprocessed .md files in the memory directory.
+        Uses batch query to avoid N+1 database queries.
         
         Parameters
         ----------
@@ -365,16 +366,45 @@ class MemoryRetriever:
         List[str]
             List of file paths (relative to memory_dir) that are not processed
         """
-        unprocessed = []
         try:
             memory_dir_path = Path(memory_dir)
-            for file_path in memory_dir_path.rglob("*.md"):
-                if not self.is_file_processed(str(file_path)):
-                    unprocessed.append(str(file_path))
+            # Get all .md files in the directory
+            all_md_files = [str(f) for f in memory_dir_path.rglob("*.md")]
+            
+            if not all_md_files:
+                return []
+            
+            # Batch query to get all processed files in one query
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Create placeholders for SQL IN clause
+                placeholders = ",".join(["?" for _ in all_md_files])
+                
+                cursor.execute(
+                    f"SELECT file_path FROM processed_files WHERE file_path IN ({placeholders})",
+                    all_md_files
+                )
+                
+                processed_set = {row[0] for row in cursor.fetchall()}
+            
+            # Return files that are not in the processed set
+            unprocessed = [f for f in all_md_files if f not in processed_set]
+            return unprocessed
+            
         except Exception as e:
             print(f"Error getting unprocessed files: {e}")
-        
-        return unprocessed
+            # Fallback to individual queries
+            unprocessed = []
+            try:
+                memory_dir_path = Path(memory_dir)
+                for file_path in memory_dir_path.rglob("*.md"):
+                    if not self.is_file_processed(str(file_path)):
+                        unprocessed.append(str(file_path))
+            except Exception as e2:
+                print(f"Fallback query also failed: {e2}")
+            
+            return unprocessed
 
 def cleanup_raw_files(retention_days: int = 1, max_size_kb: int = 250, memory_dir: str = None, dry_run: bool = False) -> dict:
     """
