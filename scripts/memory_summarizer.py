@@ -266,14 +266,17 @@ Now analyze the following memory content:
             
             if preferred_model:
                 # Try to find the preferred model in provider's model list
-                for model in models:
-                    if model.get("id") == preferred_model:
+                for model_item in models:
+                    # Handle both dict format {"id": "model-name"} and string format "model-name"
+                    model_item_id = model_item.get("id", model_item) if isinstance(model_item, dict) else model_item
+                    if model_item_id == preferred_model:
                         model_id = preferred_model
                         break
             
             # If no preferred model or not found, use first available model
             if not model_id and models and len(models) > 0:
-                model_id = models[0].get("id")
+                first_model = models[0]
+                model_id = first_model.get("id", first_model) if isinstance(first_model, dict) else first_model
             
             if not model_id:
                 print("Warning: No model configured in provider, using rule-based extraction")
@@ -370,6 +373,7 @@ Now analyze the following memory content:
         2. Technical facts  
         3. Learning facts (lowest priority)
         """
+        MAX_FACT_LENGTH = 300
         facts = []
         lines = content.split('\n')
         
@@ -395,6 +399,10 @@ Now analyze the following memory content:
             
             lines_processed = True
             line_lower = line.lower()
+            
+            # Truncate line if too long (prevent Base64-like content from bloating database)
+            if len(line) > MAX_FACT_LENGTH:
+                line = line[:MAX_FACT_LENGTH] + "..."
             
             # Check categories in priority order (first match wins)
             if any(keyword in line_lower for keyword in project_keywords):
@@ -440,7 +448,7 @@ Now analyze the following memory content:
                     continue
                 if line in ('---', '***', '___', '```', '```json', '```python'):
                     continue
-                meaningful_content = line[:200] + ("..." if len(line) > 200 else "")
+                meaningful_content = line[:MAX_FACT_LENGTH] + ("..." if len(line) > MAX_FACT_LENGTH else "")
                 break
             
             if meaningful_content:
@@ -810,6 +818,19 @@ Now analyze the following memory content:
         return result
 
 
+# Module-level singleton function for DeepRecallSummarizer
+def _get_summarizer(db_path: str = None, memory_dir: str = None) -> "DeepRecallSummarizer":
+    """
+    Get a fresh DeepRecallSummarizer instance (not a true singleton, 
+    ensures fresh stats for each call).
+    
+    Returns
+    -------
+    DeepRecallSummarizer
+        New summarizer instance with fresh statistics
+    """
+    return DeepRecallSummarizer(db_path=db_path, memory_dir=memory_dir)
+
 # Module-level wrapper functions for OpenClaw tool registration
 async def summarize_memory_files(
     process_all: bool = False, 
@@ -833,7 +854,7 @@ async def summarize_memory_files(
     dict
         Processing statistics or result dictionary
     """
-    summarizer = DeepRecallSummarizer()
+    summarizer = _get_summarizer()
     store_raw = not no_store_raw
     
     if process_file:
@@ -850,7 +871,6 @@ async def summarize_memory_files(
 
 def main():
     """Command-line interface for DeepRecall Summarizer."""
-    import argparse
     
     parser = argparse.ArgumentParser(
         description="DeepRecall Memory Summarizer - LLM-powered fact extraction for SQLite memory system"

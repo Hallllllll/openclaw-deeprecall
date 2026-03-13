@@ -10,7 +10,7 @@ import json
 import argparse
 import asyncio
 from pathlib import Path
-from memory_retriever import MemoryRetriever, retrieve_l1_facts, retrieve_l2_raw, cleanup_raw_files
+from memory_retriever import MemoryRetriever, retrieve_l1_facts, retrieve_l2_raw, cleanup_raw_files, _get_retriever
 
 def main():
     parser = argparse.ArgumentParser(description="SQLite memory database retrieval tool")
@@ -61,7 +61,7 @@ def main():
         print(result)
     
     elif args.command == "stats":
-        retriever = MemoryRetriever()
+        retriever = _get_retriever()
         stats = retriever.get_table_stats()
         print(json.dumps(stats, indent=2, ensure_ascii=False))
     

@@ -162,7 +162,7 @@ class MemoryRetriever:
                         tokenize='unicode61'
                     )
                 ''')
-                print("FTS5 virtual table created/enabled for semantic search")
+                # FTS5 virtual table created for semantic search
                 
                 # Create triggers to keep FTS index in sync with l1_structured table
                 cursor.execute('''
@@ -192,10 +192,10 @@ class MemoryRetriever:
                 cursor.execute('SELECT COUNT(*) FROM l1_fts')
                 fts_count = cursor.fetchone()[0]
                 
-                if l1_count > 0 and fts_count == 0:
-                    print("FTS5 table is empty but l1_structured has data, rebuilding index...")
+                if l1_count > 0 and fts_count < l1_count:
+                    print("FTS5 table is missing some records, rebuilding index...")
                     cursor.execute('INSERT INTO l1_fts(l1_fts) VALUES("rebuild")')
-                    print("FTS5 index rebuilt")
+                    # FTS5 index rebuilt
                     
             except sqlite3.OperationalError as e:
                 print(f"Note: FTS5 not available, using LIKE-based search: {e}")
@@ -257,13 +257,7 @@ class MemoryRetriever:
                             '''
                             cursor.execute(sql, (fts_query, limit))
                             results = cursor.fetchall()
-                            
-                            if results:
-                                # FTS5 search succeeded, skip to formatting
-                                pass
-                            else:
-                                # No results from FTS5, fall back to LIKE
-                                raise sqlite3.OperationalError("No FTS5 results")
+                            # FTS5 query succeeded, proceed to formatting regardless of empty results
                         else:
                             raise sqlite3.OperationalError("No valid FTS5 query")
                     else:
@@ -319,8 +313,11 @@ class MemoryRetriever:
         # Format output - extreme compression (no content truncation)
         formatted = []
         for date, fact_type, source_file, content in results:
-            # Clean fact_type: strip prefix, e.g., "project_example-project" -> "project"
-            clean_type = fact_type.split('_')[0] if '_' in fact_type else fact_type
+            # Clean fact_type: only strip prefix for project_ types, preserve other types like user_profile
+            if fact_type.startswith("project_"):
+                clean_type = "project"
+            else:
+                clean_type = fact_type
             
             # Compact format: [date | type | source:file] content
             # Note: no truncation is applied; content is returned in full
@@ -595,7 +592,7 @@ def cleanup_raw_files(retention_days: int = 1, max_size_kb: int = 250, memory_di
     
     # Clean up orphaned .processed marker files (if any exist from previous version)
     orphaned_markers_deleted = 0
-    for marker_path in Path(memory_dir).rglob("*.md.processed"):
+    for marker_path in Path(memory_dir).glob("*.md.processed"):
         # Check if corresponding .md file exists
         source_md = marker_path.with_suffix("")  # Remove .processed suffix
         if not source_md.exists():
