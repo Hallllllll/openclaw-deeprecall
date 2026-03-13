@@ -91,7 +91,9 @@ class MemoryRetriever:
             self.db_path = db_path
         
         # Ensure database directory exists
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:  # Only create directory if path contains a directory component
+            os.makedirs(db_dir, exist_ok=True)
         
         # Initialize database tables (self-bootstrapping)
         self._init_db()
@@ -101,43 +103,42 @@ class MemoryRetriever:
         Initialize database tables if they don't exist.
         This ensures zero-config deployment - tables are created automatically.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Create L1 structured facts table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS l1_structured (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT NOT NULL,
-                source_file TEXT NOT NULL,
-                fact_type TEXT NOT NULL,
-                confidence REAL,
-                tags TEXT,
-                content_hash TEXT UNIQUE,
-                content TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Create L2 raw archive table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS l2_archive (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT NOT NULL,
-                source_file TEXT UNIQUE NOT NULL,
-                raw_content TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Create indexes for faster queries
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_l1_date ON l1_structured(date)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_l1_type ON l1_structured(fact_type)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_l1_source ON l1_structured(source_file)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_l2_source ON l2_archive(source_file)')
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Create L1 structured facts table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS l1_structured (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,
+                    source_file TEXT NOT NULL,
+                    fact_type TEXT NOT NULL,
+                    confidence REAL,
+                    tags TEXT,
+                    content_hash TEXT UNIQUE,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Create L2 raw archive table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS l2_archive (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,
+                    source_file TEXT UNIQUE NOT NULL,
+                    raw_content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Create indexes for faster queries
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_l1_date ON l1_structured(date)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_l1_type ON l1_structured(fact_type)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_l1_source ON l1_structured(source_file)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_l2_source ON l2_archive(source_file)')
+            
+            conn.commit()
     
     def search_l1_structured(self, query: str = None, limit: int = 10) -> List[str]:
         """
@@ -156,32 +157,31 @@ class MemoryRetriever:
             Formatted facts: '[YYYY-MM-DD | fact_type | source:source_file] content...'
             No content truncation is applied.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        if query:
-            # Semantic search (vector search can be integrated later)
-            sql = '''
-                SELECT date, fact_type, source_file, content 
-                FROM l1_structured 
-                WHERE content LIKE ? OR tags LIKE ?
-                ORDER BY confidence DESC, date DESC
-                LIMIT ?
-            '''
-            params = (f'%{query}%', f'%{query}%', limit)
-        else:
-            # Retrieve latest records
-            sql = '''
-                SELECT date, fact_type, source_file, content
-                FROM l1_structured
-                ORDER BY date DESC, confidence DESC
-                LIMIT ?
-            '''
-            params = (limit,)
-        
-        cursor.execute(sql, params)
-        results = cursor.fetchall()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            if query:
+                # Semantic search (vector search can be integrated later)
+                sql = '''
+                    SELECT date, fact_type, source_file, content 
+                    FROM l1_structured 
+                    WHERE content LIKE ? OR tags LIKE ?
+                    ORDER BY confidence DESC, date DESC
+                    LIMIT ?
+                '''
+                params = (f'%{query}%', f'%{query}%', limit)
+            else:
+                # Retrieve latest records
+                sql = '''
+                    SELECT date, fact_type, source_file, content
+                    FROM l1_structured
+                    ORDER BY date DESC, confidence DESC
+                    LIMIT ?
+                '''
+                params = (limit,)
+            
+            cursor.execute(sql, params)
+            results = cursor.fetchall()
         
         # Format output - extreme compression (no content truncation)
         formatted = []
@@ -210,35 +210,32 @@ class MemoryRetriever:
         Optional[str]
             Complete raw Markdown content, or None if the file is not found.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT raw_content FROM l2_archive 
-            WHERE source_file = ? 
-            LIMIT 1
-        ''', (source_file,))
-        
-        result = cursor.fetchone()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT raw_content FROM l2_archive 
+                WHERE source_file = ? 
+                LIMIT 1
+            ''', (source_file,))
+            
+            result = cursor.fetchone()
         
         return result[0] if result else None
     
     def get_table_stats(self) -> dict:
         """Return basic statistics about the memory database."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT COUNT(*) FROM l1_structured')
-        l1_count = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT COUNT(*) FROM l2_archive')
-        l2_count = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT DISTINCT fact_type FROM l1_structured')
-        fact_types = [row[0] for row in cursor.fetchall()]
-        
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT COUNT(*) FROM l1_structured')
+            l1_count = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM l2_archive')
+            l2_count = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT DISTINCT fact_type FROM l1_structured')
+            fact_types = [row[0] for row in cursor.fetchall()]
         
         return {
             'l1_structured_count': l1_count,

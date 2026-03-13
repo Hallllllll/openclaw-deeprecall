@@ -12,21 +12,3 @@
     }
   }
 }
-
-/*
-Configuration Options:
-- preferred_provider: Provider name from OpenClaw configuration (e.g., "deepseek-reasoner", "qwen")
-- preferred_model: Model ID from the provider's models list
-- max_content_length: Maximum content length to send to LLM (characters)
-- temperature: LLM temperature (0.0-1.0), lower = more deterministic
-- max_tokens: Maximum tokens in LLM response
-- timeout_seconds: API timeout in seconds
-- store_raw_content: Whether to store raw content to L2 archive
-- auto_summarize_cron: Cron expression for automatic summarization (optional)
-
-Place this file as `config.json` in your DeepRecall directory or workspace root.
-The summarizer will look for configuration in this order:
-1. Current directory: ./config.json
-2. Workspace root: ./deeprecall_config.json  
-3. OpenClaw workspace: ../config.json
-*/

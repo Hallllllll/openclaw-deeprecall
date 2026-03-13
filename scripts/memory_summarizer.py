@@ -35,7 +35,9 @@ class DeepRecallSummarizer:
             self.db_path = db_path
         
         # Ensure database directory exists
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:  # Only create directory if path contains a directory component
+            os.makedirs(db_dir, exist_ok=True)
         
         # Get workspace memory directory for raw files
         self.memory_dir = get_workspace_memory_dir()
@@ -427,19 +429,20 @@ Now analyze the following memory content:
         bool
             True if successful, False otherwise
         """
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+        
+        fact_type = fact.get("type", "unknown")
+        content = fact.get("content", "")
+        confidence = float(fact.get("confidence", 0.0))
+        tags_list = fact.get("tags", [])
+        tags = ",".join(tags_list) if tags_list else ""
+        
+        # Generate content hash for deduplication
+        content_hash = hashlib.md5(content.encode()).hexdigest()
+        
+        conn = None
         try:
-            if date is None:
-                date = datetime.now().strftime("%Y-%m-%d")
-            
-            fact_type = fact.get("type", "unknown")
-            content = fact.get("content", "")
-            confidence = float(fact.get("confidence", 0.0))
-            tags_list = fact.get("tags", [])
-            tags = ",".join(tags_list) if tags_list else ""
-            
-            # Generate content hash for deduplication
-            content_hash = hashlib.md5(content.encode()).hexdigest()
-            
             conn = self._get_db_connection()
             cursor = conn.cursor()
             
@@ -452,7 +455,6 @@ Now analyze the following memory content:
             
             if existing:
                 print(f"  Fact already exists (hash: {content_hash[:8]}), skipping")
-                conn.close()
                 return False
             
             # Insert new fact
@@ -466,14 +468,15 @@ Now analyze the following memory content:
             )
             
             conn.commit()
-            conn.close()
-            
             self.stats["facts_stored"] += 1
             return True
             
         except Exception as e:
             print(f"Error storing fact to database: {e}")
             return False
+        finally:
+            if conn:
+                conn.close()
     
     def store_raw_content_to_db(self, source_file: str, content: str, date: str = None) -> bool:
         """
@@ -493,10 +496,11 @@ Now analyze the following memory content:
         bool
             True if successful, False otherwise
         """
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+        
+        conn = None
         try:
-            if date is None:
-                date = datetime.now().strftime("%Y-%m-%d")
-            
             conn = self._get_db_connection()
             cursor = conn.cursor()
             
@@ -529,14 +533,15 @@ Now analyze the following memory content:
                 )
             
             conn.commit()
-            conn.close()
-            
             self.stats["raw_content_stored"] += 1
             return True
             
         except Exception as e:
             print(f"Error storing raw content to database: {e}")
             return False
+        finally:
+            if conn:
+                conn.close()
     
     def mark_file_as_processed(self, file_path: Path) -> bool:
         """
@@ -658,6 +663,45 @@ Now analyze the following memory content:
         print("="*60)
         
         return self.stats.copy()
+
+
+# Module-level wrapper functions for OpenClaw tool registration
+async def summarize_memory_files(
+    process_all: bool = False, 
+    process_file: str = None, 
+    no_store_raw: bool = False
+) -> dict:
+    """
+    Module-level wrapper for OpenClaw tool registration.
+    
+    Parameters
+    ----------
+    process_all : bool
+        Process all unprocessed memory files
+    process_file : str, optional
+        Process a specific memory file (relative to memory directory)
+    no_store_raw : bool
+        Do not store raw content to L2 archive
+        
+    Returns
+    -------
+    dict
+        Processing statistics or result dictionary
+    """
+    summarizer = DeepRecallSummarizer()
+    store_raw = not no_store_raw
+    
+    if process_file:
+        memory_dir = get_workspace_memory_dir()
+        file_path = Path(memory_dir) / process_file
+        success = await summarizer.process_single_file(file_path, store_raw=store_raw)
+        return {"success": success, "file": process_file, "stats": summarizer.stats}
+    elif process_all:
+        stats = await summarizer.process_all_files(store_raw=store_raw)
+        return {"success": True, "stats": stats}
+    else:
+        return {"error": "Either process_all or process_file must be specified"}
+
 
 def main():
     """Command-line interface for DeepRecall Summarizer."""

@@ -92,7 +92,7 @@
         }
       },
       "returns": "object",
-      "implementation": "scripts.memory_summarizer.DeepRecallSummarizer.process_all_files"
+      "implementation": "scripts.memory_summarizer.summarize_memory_files"
     }
   },
   "dependencies": [],

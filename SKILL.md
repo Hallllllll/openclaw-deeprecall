@@ -127,7 +127,8 @@ DeepRecall features zero-config deployment:
 - `scripts/memory_retriever.py` - Core retrieval engine with cleanup
 - `scripts/memory_db_tool.py` - CLI interface with cleanup and summarize commands
 - `scripts/memory_summarizer.py` - LLM-powered fact extraction engine
-- `config.example.json` - Example configuration file
+- `config.example.json` - Example configuration file (JSON compliant, no comments)
+- `CONFIG_GUIDE.md` - Detailed configuration guide
 - `manifest.json` - ClawHub skill manifest
 - `memory.db` - Permanent SQLite database (per-agent, auto-created)
 - `*.md` - Temporary session files (auto-cleaned)
@@ -136,6 +137,8 @@ DeepRecall features zero-config deployment:
 
 ### LLM Summarizer Configuration
 DeepRecall Summarizer automatically reads configuration from OpenClaw's `openclaw.json`. You can customize its behavior by creating a `config.json` file:
+
+**Note**: For detailed configuration options and examples, see `CONFIG_GUIDE.md`.
 
 1. **Copy the example configuration**:
    ```bash
