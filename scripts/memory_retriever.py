@@ -158,10 +158,45 @@ class MemoryRetriever:
                         content, 
                         tags,
                         content=l1_structured,
-                        content_rowid=id
+                        content_rowid=id,
+                        tokenize='unicode61'
                     )
                 ''')
                 print("FTS5 virtual table created/enabled for semantic search")
+                
+                # Create triggers to keep FTS index in sync with l1_structured table
+                cursor.execute('''
+                    CREATE TRIGGER IF NOT EXISTS l1_ai AFTER INSERT ON l1_structured BEGIN
+                        INSERT INTO l1_fts(rowid, content, tags) 
+                        VALUES (new.id, new.content, new.tags);
+                    END
+                ''')
+                cursor.execute('''
+                    CREATE TRIGGER IF NOT EXISTS l1_ad AFTER DELETE ON l1_structured BEGIN
+                        INSERT INTO l1_fts(l1_fts, rowid, content, tags)
+                        VALUES ('delete', old.id, old.content, old.tags);
+                    END
+                ''')
+                cursor.execute('''
+                    CREATE TRIGGER IF NOT EXISTS l1_au AFTER UPDATE ON l1_structured BEGIN
+                        INSERT INTO l1_fts(l1_fts, rowid, content, tags) 
+                        VALUES ('delete', old.id, old.content, old.tags);
+                        INSERT INTO l1_fts(rowid, content, tags) 
+                        VALUES (new.id, new.content, new.tags);
+                    END
+                ''')
+                
+                # Check if l1_structured has data but l1_fts is empty, rebuild index
+                cursor.execute('SELECT COUNT(*) FROM l1_structured')
+                l1_count = cursor.fetchone()[0]
+                cursor.execute('SELECT COUNT(*) FROM l1_fts')
+                fts_count = cursor.fetchone()[0]
+                
+                if l1_count > 0 and fts_count == 0:
+                    print("FTS5 table is empty but l1_structured has data, rebuilding index...")
+                    cursor.execute('INSERT INTO l1_fts(l1_fts) VALUES("rebuild")')
+                    print("FTS5 index rebuilt")
+                    
             except sqlite3.OperationalError as e:
                 print(f"Note: FTS5 not available, using LIKE-based search: {e}")
             
@@ -188,38 +223,88 @@ class MemoryRetriever:
             cursor = conn.cursor()
             
             if query:
-                # Support OR-separated multi-keyword queries
-                keywords = [kw.strip() for kw in query.split(" OR ") if kw.strip()]
-                conditions = []
-                params = []
-                
-                for kw in keywords:
-                    # Split each OR group into individual words (AND semantics within group)
-                    sub_keywords = kw.split()
-                    group_conditions = []
-                    for sub_kw in sub_keywords:
-                        if sub_kw:  # Skip empty strings
-                            group_conditions.append("(content LIKE ? OR tags LIKE ?)")
-                            params.extend([f'%{sub_kw}%', f'%{sub_kw}%'])
+                # Try FTS5 full-text search first, fall back to LIKE if needed
+                try:
+                    # Check if FTS5 table exists
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='l1_fts'")
+                    fts_table_exists = cursor.fetchone() is not None
                     
-                    if group_conditions:
-                        # Join AND conditions within group
-                        conditions.append("(" + " AND ".join(group_conditions) + ")")
-                
-                if not conditions:
-                    # Fallback to simple search if no valid keywords
-                    conditions.append("(content LIKE ? OR tags LIKE ?)")
-                    params.extend([f'%{query}%', f'%{query}%'])
-                
-                where_clause = " OR ".join(conditions)
-                sql = f'''
-                    SELECT date, fact_type, source_file, content 
-                    FROM l1_structured 
-                    WHERE {where_clause}
-                    ORDER BY confidence DESC, date DESC
-                    LIMIT ?
-                '''
-                params.append(limit)
+                    if fts_table_exists:
+                        # Convert query to FTS5 MATCH syntax
+                        # Support "Vue error OR sandbox failure" syntax
+                        or_groups = [kw.strip() for kw in query.split(" OR ") if kw.strip()]
+                        fts_conditions = []
+                        
+                        for group in or_groups:
+                            # Escape double quotes in query for FTS5
+                            escaped_group = group.replace('"', '""')
+                            # For multi-word groups, wrap in quotes for phrase search
+                            if ' ' in escaped_group:
+                                fts_conditions.append(f'"{escaped_group}"')
+                            else:
+                                fts_conditions.append(escaped_group)
+                        
+                        if fts_conditions:
+                            fts_query = " OR ".join(fts_conditions)
+                            
+                            sql = '''
+                                SELECT s.date, s.fact_type, s.source_file, s.content
+                                FROM l1_fts f
+                                JOIN l1_structured s ON f.rowid = s.id
+                                WHERE l1_fts MATCH ?
+                                ORDER BY rank, s.confidence DESC, s.date DESC
+                                LIMIT ?
+                            '''
+                            cursor.execute(sql, (fts_query, limit))
+                            results = cursor.fetchall()
+                            
+                            if results:
+                                # FTS5 search succeeded, skip to formatting
+                                pass
+                            else:
+                                # No results from FTS5, fall back to LIKE
+                                raise sqlite3.OperationalError("No FTS5 results")
+                        else:
+                            raise sqlite3.OperationalError("No valid FTS5 query")
+                    else:
+                        raise sqlite3.OperationalError("FTS5 table not found")
+                        
+                except sqlite3.OperationalError:
+                    # FTS5 failed, use LIKE-based search
+                    # Original LIKE-based search logic
+                    keywords = [kw.strip() for kw in query.split(" OR ") if kw.strip()]
+                    conditions = []
+                    params = []
+                    
+                    for kw in keywords:
+                        # Split each OR group into individual words (AND semantics within group)
+                        sub_keywords = kw.split()
+                        group_conditions = []
+                        for sub_kw in sub_keywords:
+                            if sub_kw:  # Skip empty strings
+                                group_conditions.append("(content LIKE ? OR tags LIKE ?)")
+                                params.extend([f'%{sub_kw}%', f'%{sub_kw}%'])
+                        
+                        if group_conditions:
+                            # Join AND conditions within group
+                            conditions.append("(" + " AND ".join(group_conditions) + ")")
+                    
+                    if not conditions:
+                        # Fallback to simple search if no valid keywords
+                        conditions.append("(content LIKE ? OR tags LIKE ?)")
+                        params.extend([f'%{query}%', f'%{query}%"])
+                    
+                    where_clause = " OR ".join(conditions)
+                    sql = f'''
+                        SELECT date, fact_type, source_file, content 
+                        FROM l1_structured 
+                        WHERE {where_clause}
+                        ORDER BY confidence DESC, date DESC
+                        LIMIT ?
+                    '''
+                    params.append(limit)
+                    cursor.execute(sql, params)
+                    results = cursor.fetchall()
             else:
                 # Retrieve latest records
                 sql = '''
@@ -228,10 +313,8 @@ class MemoryRetriever:
                     ORDER BY date DESC, confidence DESC
                     LIMIT ?
                 '''
-                params = (limit,)
-            
-            cursor.execute(sql, params)
-            results = cursor.fetchall()
+                cursor.execute(sql, (limit,))
+                results = cursor.fetchall()
         
         # Format output - extreme compression (no content truncation)
         formatted = []
@@ -244,9 +327,7 @@ class MemoryRetriever:
             line = f"[{date} | {clean_type} | source:{source_file}] {content}"
             formatted.append(line)
         
-        return formatted
-    
-    def get_l2_raw(self, source_file: str) -> Optional[str]:
+        return formatted    def get_l2_raw(self, source_file: str) -> Optional[str]:
         """
         Retrieve exact raw content from the L2 archive.
         

@@ -9,6 +9,7 @@ import json
 import re
 import hashlib
 import asyncio
+import traceback
 import aiohttp
 import sqlite3
 from pathlib import Path
@@ -20,7 +21,7 @@ import sys
 from memory_retriever import get_agent_db_path, get_workspace_memory_dir
 
 class DeepRecallSummarizer:
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str = None, memory_dir: str = None):
         """
         Initialize the DeepRecall summarizer.
         
@@ -28,6 +29,8 @@ class DeepRecallSummarizer:
         ----------
         db_path : str, optional
             Database path. If None, auto-detect using DeepRecall's logic.
+        memory_dir : str, optional
+            Memory directory path. If None, auto-detect using workspace.
         """
         if db_path is None:
             self.db_path = get_agent_db_path()
@@ -40,7 +43,10 @@ class DeepRecallSummarizer:
             os.makedirs(db_dir, exist_ok=True)
         
         # Get workspace memory directory for raw files
-        self.memory_dir = get_workspace_memory_dir()
+        if memory_dir:
+            self.memory_dir = memory_dir
+        else:
+            self.memory_dir = get_workspace_memory_dir()
         
         # Create MemoryRetriever instance for database operations
         from memory_retriever import MemoryRetriever
@@ -350,7 +356,6 @@ Now analyze the following memory content:
             return await self._extract_facts_with_rules(content)
         except Exception as e:
             print(f"LLM API call exception: {type(e).__name__}: {e}")
-            import traceback
             traceback.print_exc()
             # Fallback to rule extraction
             return await self._extract_facts_with_rules(content)
@@ -705,6 +710,104 @@ Now analyze the following memory content:
         print("="*60)
         
         return self.stats.copy()
+    
+    def test_configuration(self) -> Dict[str, Any]:
+        """
+        Test and display configuration status.
+        
+        Returns
+        -------
+        Dict[str, Any]
+            Configuration test results including:
+            - openclaw_providers: List of provider names
+            - available_providers: List of available providers with baseUrl and apiKey
+            - deeprecall_config: DeepRecall configuration
+            - selected_provider: Selected provider based on configuration
+        """
+        result = {
+            "openclaw_providers": [],
+            "available_providers": [],
+            "deeprecall_config": {},
+            "selected_provider": None
+        }
+        
+        # Get OpenClaw configuration
+        openclaw_config = self._get_openclaw_config()
+        available_providers = []
+        
+        print("\n=== DeepRecall Configuration Test ===\n")
+        print("1. OpenClaw Model Providers:")
+        print(f"   Found {len(openclaw_config)} provider(s)")
+        
+        for provider_name, provider_config in openclaw_config.items():
+            has_base_url = "baseUrl" in provider_config
+            has_api_key = bool(provider_config.get("apiKey"))
+            models = provider_config.get("models", [])
+            status = "✅ Available" if has_base_url and has_api_key else "⚠️  Incomplete"
+            
+            print(f"\n   {provider_name}: {status}")
+            if has_base_url:
+                print(f"      baseUrl: {provider_config.get('baseUrl')}")
+            if models:
+                print(f"      models: {len(models)} model(s)")
+                for model in models[:2]:
+                    model_id = model.get("id", model) if isinstance(model, dict) else model
+                    print(f"        - {model_id}")
+                if len(models) > 2:
+                    print(f"        ... and {len(models) - 2} more")
+            
+            if has_base_url and has_api_key:
+                available_providers.append(provider_name)
+        
+        # Get DeepRecall configuration
+        deeprecall_config = self.config.get("summarizer", {})
+        print("\n2. DeepRecall Summarizer Configuration:")
+        
+        if deeprecall_config:
+            print("   ✅ Custom configuration loaded")
+            for key, value in deeprecall_config.items():
+                print(f"      {key}: {value}")
+        else:
+            print("   ℹ️  Using default configuration")
+        
+        print("\n3. Provider Selection:")
+        preferred = deeprecall_config.get("preferred_provider")
+        
+        if available_providers:
+            print(f"   Available providers: {available_providers}")
+            print("   Selection priority:")
+            print("     1. preferred_provider from DeepRecall config")
+            print("     2. First available provider with baseUrl and apiKey")
+            print("     3. Rule-based extraction (fallback)")
+            
+            if preferred and preferred in available_providers:
+                selected = preferred
+                print(f"   ✅ Will use configured provider: {preferred}")
+            elif preferred:
+                print(f"   ⚠️  Configured provider '{preferred}' not available")
+                print(f"   ⚠️  Will auto-select from: {available_providers}")
+                selected = available_providers[0] if available_providers else None
+            else:
+                print(f"   ℹ️  No preferred provider configured")
+                print(f"   ℹ️  Will auto-select from: {available_providers}")
+                selected = available_providers[0] if available_providers else None
+        else:
+            print("   ❌ No available providers found")
+            print("   ⚠️  Summarizer will use rule-based extraction")
+            selected = None
+        
+        if selected:
+            print(f"   📍 Selected provider: {selected}")
+        
+        print("\n=== Configuration Test Complete ===")
+        
+        # Populate result dictionary
+        result["openclaw_providers"] = list(openclaw_config.keys())
+        result["available_providers"] = available_providers
+        result["deeprecall_config"] = deeprecall_config
+        result["selected_provider"] = selected
+        
+        return result
 
 
 # Module-level wrapper functions for OpenClaw tool registration
@@ -783,87 +886,20 @@ def main():
     args = parser.parse_args()
     
     # Initialize summarizer
-    summarizer = DeepRecallSummarizer(db_path=args.db_path)
+    summarizer = DeepRecallSummarizer(db_path=args.db_path, memory_dir=args.memory_dir)
     
     print("DeepRecall Memory Summarizer")
     print(f"Database: {summarizer.db_path}")
     print(f"Memory directory: {summarizer.memory_dir}")
     
     if args.test_config:
-        # Test configuration
-        print("\n=== DeepRecall Configuration Test ===\n")
-        
-        # Test OpenClaw configuration
-        openclaw_config = summarizer._get_openclaw_config()
-        print("1. OpenClaw Model Providers:")
-        print(f"   Found {len(openclaw_config)} provider(s)")
-        
-        available_providers = []
-        for provider_name, provider_config in openclaw_config.items():
-            has_base_url = "baseUrl" in provider_config
-            has_api_key = bool(provider_config.get("apiKey"))
-            models = provider_config.get("models", [])
-            status = "✅ Available" if has_base_url and has_api_key else "⚠️  Incomplete"
-            
-            print(f"\n   {provider_name}: {status}")
-            if has_base_url:
-                print(f"      baseUrl: {provider_config.get('baseUrl')}")
-            if models:
-                print(f"      models: {len(models)} model(s)")
-                for model in models[:2]:
-                    print(f"        - {model.get('id', 'Unknown')}")
-                if len(models) > 2:
-                    print(f"        ... and {len(models) - 2} more")
-            
-            if has_base_url and has_api_key:
-                available_providers.append(provider_name)
-        
-        # Test DeepRecall configuration
-        print("\n2. DeepRecall Summarizer Configuration:")
-        deeprecall_config = summarizer.config.get("summarizer", {})
-        
-        if deeprecall_config:
-            print("   ✅ Custom configuration loaded")
-            for key, value in deeprecall_config.items():
-                print(f"      {key}: {value}")
-        else:
-            print("   ℹ️  Using default configuration")
-        
-        # Show provider selection logic
-        print("\n3. Provider Selection Logic:")
-        if available_providers:
-            preferred = deeprecall_config.get("preferred_provider")
-            if preferred:
-                if preferred in available_providers:
-                    print(f"   ✅ Will use configured provider: {preferred}")
-                else:
-                    print(f"   ⚠️  Configured provider '{preferred}' not available")
-                    print(f"   ⚠️  Will auto-select from: {available_providers}")
-            else:
-                print(f"   ℹ️  No preferred provider configured")
-                print(f"   ℹ️  Will auto-select from: {available_providers}")
-            
-            # Show what would be selected
-            if preferred and preferred in available_providers:
-                selected = preferred
-            elif available_providers:
-                selected = available_providers[0]
-            else:
-                selected = None
-            
-            if selected:
-                print(f"   📍 Selected provider would be: {selected}")
-        else:
-            print("   ❌ No available providers found")
-            print("   ⚠️  Summarizer will use rule-based extraction")
-        
-        print("\n=== Configuration Test Complete ===")
+        # Test configuration using the unified method
+        summarizer.test_configuration()
     
     elif args.process_all:
         # Process all files
         store_raw = not args.no_store_raw
         print(f"\nProcessing all files (store_raw: {store_raw})...")
-        import asyncio
         stats = asyncio.run(summarizer.process_all_files(store_raw=store_raw))
         
         # Save statistics to file
@@ -882,7 +918,6 @@ def main():
             file_path = Path(summarizer.memory_dir) / file_path
         
         print(f"\nProcessing single file: {file_path} (store_raw: {store_raw})...")
-        import asyncio
         success = asyncio.run(summarizer.process_single_file(file_path, store_raw))
         
         if success:
