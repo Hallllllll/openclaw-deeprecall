@@ -42,6 +42,10 @@ class DeepRecallSummarizer:
         # Get workspace memory directory for raw files
         self.memory_dir = get_workspace_memory_dir()
         
+        # Create MemoryRetriever instance for database operations
+        from memory_retriever import MemoryRetriever
+        self.retriever = MemoryRetriever(db_path=self.db_path)
+        
         # Load DeepRecall configuration
         self.config = self._get_deeprecall_config()
         
@@ -119,7 +123,7 @@ Now analyze the following memory content:
             # Try to find openclaw.json in common locations
             possible_paths = [
                 Path.home() / ".openclaw" / "openclaw.json",
-                Path("/root/.openclaw/openclaw.json"),
+                Path("/etc/openclaw/openclaw.json"),  # System-wide configuration
                 Path.cwd().parent / "openclaw.json",
                 Path.cwd() / "openclaw.json"
             ]
@@ -284,8 +288,10 @@ Now analyze the following memory content:
                     {"role": "user", "content": full_prompt}
                 ],
                 "temperature": temperature,
-                "max_tokens": max_tokens,
-                "response_format": {"type": "json_object"}
+                "max_tokens": max_tokens
+                # Note: response_format is intentionally omitted for broader compatibility
+                # Some OpenAI-compatible APIs don't support this parameter
+                # The prompt already explicitly requests JSON output
             }
             
             print(f"Calling LLM API to extract facts, content length: {len(content)} characters")
@@ -348,16 +354,26 @@ Now analyze the following memory content:
         """
         Rule-based extraction fallback method.
         Used when LLM API fails.
+        
+        Note: Each line is classified into at most one category using priority order:
+        1. Project-related facts (highest priority)
+        2. Technical facts  
+        3. Learning facts (lowest priority)
         """
         facts = []
         lines = content.split('\n')
         
-        # Extract project-related facts (simplified rules)
+        # Keyword sets for classification (in priority order)
         project_keywords = ["project", "Project", "example", "Example", "development", "Development"]
+        tech_keywords = ["api", "API", "database", "model", "config", "code", "implementation", "python", "sql"]
+        learning_keywords = ["learn", "error", "experience", "lesson", "improve", "mistake", "failure"]
+        
         for line in lines:
-            if any(keyword in line.lower() for keyword in project_keywords):
+            line_lower = line.lower()
+            
+            # Check categories in priority order (first match wins)
+            if any(keyword in line_lower for keyword in project_keywords):
                 # Try to extract project name
-                import re
                 project_match = re.search(r'[Pp]roject[:\s]*([\w\s\-]+)', line)
                 project_name = "unknown-project"
                 if project_match:
@@ -370,22 +386,16 @@ Now analyze the following memory content:
                     "tags": ["project"],
                     "project_name": project_name
                 })
-        
-        # Extract technical facts
-        tech_keywords = ["api", "API", "database", "model", "config", "code", "implementation", "python", "sql"]
-        for line in lines:
-            if any(keyword in line.lower() for keyword in tech_keywords):
+            
+            elif any(keyword in line_lower for keyword in tech_keywords):
                 facts.append({
                     "type": "technical",
                     "content": line.strip(),
                     "confidence": 0.85,
                     "tags": ["technical"]
                 })
-        
-        # Extract learning facts
-        learning_keywords = ["learn", "error", "experience", "lesson", "improve", "mistake", "failure"]
-        for line in lines:
-            if any(keyword in line.lower() for keyword in learning_keywords):
+            
+            elif any(keyword in line_lower for keyword in learning_keywords):
                 facts.append({
                     "type": "learnings",
                     "content": line.strip(),
@@ -438,8 +448,8 @@ Now analyze the following memory content:
         tags_list = fact.get("tags", [])
         tags = ",".join(tags_list) if tags_list else ""
         
-        # Generate content hash for deduplication
-        content_hash = hashlib.md5(content.encode()).hexdigest()
+        # Generate content hash for deduplication (SHA-256 for collision resistance)
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
         
         conn = None
         try:
@@ -545,7 +555,7 @@ Now analyze the following memory content:
     
     def mark_file_as_processed(self, file_path: Path) -> bool:
         """
-        Mark a file as processed by creating a marker file.
+        Mark a file as processed in the database.
         
         Parameters
         ----------
@@ -558,9 +568,11 @@ Now analyze the following memory content:
             True if successful, False otherwise
         """
         try:
-            marker_path = file_path.with_suffix(file_path.suffix + ".processed")
-            marker_path.write_text(f"Processed at {datetime.now().isoformat()}\n", encoding='utf-8')
-            return True
+            # Use MemoryRetriever to mark file as processed in database
+            success = self.retriever.mark_file_as_processed(str(file_path))
+            if success:
+                print(f"  File marked as processed in database: {file_path.name}")
+            return success
         except Exception as e:
             print(f"Error marking file as processed {file_path}: {e}")
             return False
@@ -639,12 +651,11 @@ Now analyze the following memory content:
         """
         print(f"Starting to process all raw memory files in: {self.memory_dir}")
         
-        # Find all unprocessed .md files
+        # Find all unprocessed .md files using database check
         unprocessed_files = []
         for file_path in Path(self.memory_dir).rglob("*.md"):
-            # Skip already processed files
-            marker_path = file_path.with_suffix(file_path.suffix + ".processed")
-            if not marker_path.exists():
+            # Skip already processed files (check database)
+            if not self.retriever.is_file_processed(str(file_path)):
                 unprocessed_files.append(file_path)
         
         print(f"Found {len(unprocessed_files)} unprocessed files")

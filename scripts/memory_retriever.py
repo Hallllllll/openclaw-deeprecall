@@ -7,6 +7,7 @@ Provides compact-format L1 fact search and exact L2 raw-content retrieval.
 import sqlite3
 import os
 import glob
+from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timedelta
 
@@ -132,15 +133,26 @@ class MemoryRetriever:
                 )
             ''')
             
+            # Create processed_files table (replaces .processed marker files)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS processed_files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT UNIQUE NOT NULL,
+                    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
             # Create indexes for faster queries
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_l1_date ON l1_structured(date)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_l1_type ON l1_structured(fact_type)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_l1_source ON l1_structured(source_file)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_l2_source ON l2_archive(source_file)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_processed_path ON processed_files(file_path)')
             
             conn.commit()
     
-    def search_l1_structured(self, query: str = None, limit: int = 10) -> List[str]:
+    def search_l1_structured(self, query: str = None, limit: int = 5) -> List[str]:
         """
         Retrieve L1 structured facts in a compact, token-optimized format.
         
@@ -148,7 +160,7 @@ class MemoryRetriever:
         ----------
         query : str, optional
             Search string. If None or empty, returns the latest facts.
-        limit : int, default 10
+        limit : int, default 5
             Maximum number of results.
             
         Returns
@@ -161,15 +173,38 @@ class MemoryRetriever:
             cursor = conn.cursor()
             
             if query:
-                # Semantic search (vector search can be integrated later)
-                sql = '''
+                # Support OR-separated multi-keyword queries
+                keywords = [kw.strip() for kw in query.split(" OR ") if kw.strip()]
+                conditions = []
+                params = []
+                
+                for kw in keywords:
+                    # Split each OR group into individual words (AND semantics within group)
+                    sub_keywords = kw.split()
+                    group_conditions = []
+                    for sub_kw in sub_keywords:
+                        if sub_kw:  # Skip empty strings
+                            group_conditions.append("(content LIKE ? OR tags LIKE ?)")
+                            params.extend([f'%{sub_kw}%', f'%{sub_kw}%'])
+                    
+                    if group_conditions:
+                        # Join AND conditions within group
+                        conditions.append("(" + " AND ".join(group_conditions) + ")")
+                
+                if not conditions:
+                    # Fallback to simple search if no valid keywords
+                    conditions.append("(content LIKE ? OR tags LIKE ?)")
+                    params.extend([f'%{query}%', f'%{query}%'])
+                
+                where_clause = " OR ".join(conditions)
+                sql = f'''
                     SELECT date, fact_type, source_file, content 
                     FROM l1_structured 
-                    WHERE content LIKE ? OR tags LIKE ?
+                    WHERE {where_clause}
                     ORDER BY confidence DESC, date DESC
                     LIMIT ?
                 '''
-                params = (f'%{query}%', f'%{query}%', limit)
+                params.append(limit)
             else:
                 # Retrieve latest records
                 sql = '''
@@ -242,6 +277,89 @@ class MemoryRetriever:
             'l2_archive_count': l2_count,
             'fact_types': fact_types
         }
+    
+    def mark_file_as_processed(self, file_path: str) -> bool:
+        """
+        Mark a file as processed in the database.
+        
+        Parameters
+        ----------
+        file_path : str
+            Path to the file (relative or absolute)
+            
+        Returns
+        -------
+        bool
+            True if successful, False otherwise
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''
+                    INSERT OR REPLACE INTO processed_files 
+                    (file_path, processed_at) 
+                    VALUES (?, CURRENT_TIMESTAMP)
+                    ''',
+                    (str(file_path),)
+                )
+                conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error marking file as processed in database: {e}")
+            return False
+    
+    def is_file_processed(self, file_path: str) -> bool:
+        """
+        Check if a file has been processed.
+        
+        Parameters
+        ----------
+        file_path : str
+            Path to the file (relative or absolute)
+            
+        Returns
+        -------
+        bool
+            True if file is marked as processed
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT id FROM processed_files WHERE file_path = ?',
+                    (str(file_path),)
+                )
+                result = cursor.fetchone()
+            return result is not None
+        except Exception as e:
+            print(f"Error checking if file is processed: {e}")
+            return False
+    
+    def get_unprocessed_files(self, memory_dir: str) -> List[str]:
+        """
+        Get list of unprocessed .md files in the memory directory.
+        
+        Parameters
+        ----------
+        memory_dir : str
+            Path to memory directory
+            
+        Returns
+        -------
+        List[str]
+            List of file paths (relative to memory_dir) that are not processed
+        """
+        unprocessed = []
+        try:
+            memory_dir_path = Path(memory_dir)
+            for file_path in memory_dir_path.rglob("*.md"):
+                if not self.is_file_processed(str(file_path)):
+                    unprocessed.append(str(file_path))
+        except Exception as e:
+            print(f"Error getting unprocessed files: {e}")
+        
+        return unprocessed
 
 def cleanup_raw_files(retention_days: int = 1, max_size_kb: int = 250, memory_dir: str = None, dry_run: bool = False) -> dict:
     """
@@ -347,8 +465,23 @@ def cleanup_raw_files(retention_days: int = 1, max_size_kb: int = 250, memory_di
         deleted_files = [f["path"] for f in files_to_delete]
         deleted_size_kb = sum(f["size_kb"] for f in files_to_delete)
     
+    # Clean up orphaned .processed marker files (if any exist from previous version)
+    orphaned_markers_deleted = 0
+    for marker_path in Path(memory_dir).rglob("*.md.processed"):
+        # Check if corresponding .md file exists
+        source_md = marker_path.with_suffix("")  # Remove .processed suffix
+        if not source_md.exists():
+            if not dry_run:
+                try:
+                    marker_path.unlink()
+                    orphaned_markers_deleted += 1
+                except Exception as e:
+                    continue
+            else:
+                orphaned_markers_deleted += 1
+    
     # Return cleanup statistics
-    return {
+    result = {
         "status": "completed" if not dry_run else "dry_run",
         "memory_dir": memory_dir,
         "total_files_before": total_files,
@@ -358,12 +491,28 @@ def cleanup_raw_files(retention_days: int = 1, max_size_kb: int = 250, memory_di
         "remaining_files_count": len(kept_files),
         "remaining_size_kb": round(remaining_size_kb, 2),
         "deleted_files": [f["filename"] for f in files_to_delete][:10],  # Limit output length
+        "orphaned_markers_deleted": orphaned_markers_deleted,
         "config": {
             "retention_days": retention_days,
             "max_size_kb": max_size_kb,
             "dry_run": dry_run
         }
     }
+    
+    if orphaned_markers_deleted > 0:
+        result["reason"] = f"Cleaned {orphaned_markers_deleted} orphaned .processed marker files"
+    
+    return result
+
+# Singleton retriever instance for OpenClaw tool calls
+_retriever_instance = None
+
+def _get_retriever():
+    """Get or create singleton MemoryRetriever instance."""
+    global _retriever_instance
+    if _retriever_instance is None:
+        _retriever_instance = MemoryRetriever()
+    return _retriever_instance
 
 # Tool functions - for OpenClaw Tool calls
 def retrieve_l1_facts(query: str = "", limit: int = 5) -> str:
@@ -389,7 +538,7 @@ def retrieve_l1_facts(query: str = "", limit: int = 5) -> str:
     '[2024-01-01 | project | source:example-project.md] example-project backend upgrade...'
     '[2024-01-01 | technical | source:example-project.md] Database model upgrade: Task model adds project_id field...'
     """
-    retriever = MemoryRetriever()
+    retriever = _get_retriever()
     facts = retriever.search_l1_structured(query, limit)
     
     if not facts:
@@ -413,7 +562,7 @@ def retrieve_l2_raw(source_file: str) -> str:
         Complete raw Markdown content of the specified file.
         If the file is not found, returns an error message.
     """
-    retriever = MemoryRetriever()
+    retriever = _get_retriever()
     content = retriever.get_l2_raw(source_file)
     
     if content is None:

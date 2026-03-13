@@ -10,7 +10,7 @@ import json
 import argparse
 from memory_retriever import MemoryRetriever, retrieve_l1_facts, retrieve_l2_raw, cleanup_raw_files
 
-def search_memory_db(query: str, limit: int = 10) -> str:
+def search_memory_db(query: str, limit: int = 5) -> str:
     """
     Execute a semantic search over L1 structured facts.
     
@@ -18,7 +18,7 @@ def search_memory_db(query: str, limit: int = 10) -> str:
     ----------
     query : str
         Search string. Empty string returns the latest facts.
-    limit : int, default 10
+    limit : int, default 5
         Maximum number of results.
         
     Returns
