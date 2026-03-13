@@ -230,9 +230,9 @@ Now analyze the following memory content:
                 print(f"Using configured preferred provider: {preferred_provider}")
             else:
                 # Auto-select first available provider with baseUrl and apiKey
-                for name, config in providers.items():
-                    if "baseUrl" in config and config.get("apiKey"):
-                        api_config = config
+                for name, provider_cfg in providers.items():
+                    if "baseUrl" in provider_cfg and provider_cfg.get("apiKey"):
+                        api_config = provider_cfg
                         provider_key = name
                         print(f"Auto-selected provider: {name}")
                         break
@@ -242,6 +242,9 @@ Now analyze the following memory content:
                 return await self._extract_facts_with_rules(content)
             
             base_url = api_config.get("baseUrl", "https://api.deepseek.com/v1")
+            # Remove trailing slash to avoid double slashes in URL concatenation
+            if base_url.endswith('/'):
+                base_url = base_url.rstrip('/')
             api_key = api_config.get("apiKey", "")
             
             if not api_key:

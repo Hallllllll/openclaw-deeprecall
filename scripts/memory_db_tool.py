@@ -1,63 +1,16 @@
 #!/usr/bin/env python3
 """
 memory_db_tool.py - Command-line interface for SQLite memory retrieval tools
-Provides search_memory_db and read_archive_db functionality via exec calls.
+Uses memory_retriever.py module-level functions for singleton access.
 """
 
 import sys
 import os
 import json
 import argparse
+import asyncio
+from pathlib import Path
 from memory_retriever import MemoryRetriever, retrieve_l1_facts, retrieve_l2_raw, cleanup_raw_files
-
-def search_memory_db(query: str, limit: int = 5) -> str:
-    """
-    Execute a semantic search over L1 structured facts.
-    
-    Parameters
-    ----------
-    query : str
-        Search string. Empty string returns the latest facts.
-    limit : int, default 5
-        Maximum number of results.
-        
-    Returns
-    -------
-    str
-        Compact formatted facts separated by newlines.
-        Format: '[YYYY-MM-DD | fact_type | source:source_file] content...'
-        Returns "No matching facts found." if none match.
-    """
-    retriever = MemoryRetriever()
-    facts = retriever.search_l1_structured(query, limit)
-    
-    if not facts:
-        return "No matching facts found."
-    
-    return "\n".join(facts)
-
-def read_archive_db(source_file: str) -> str:
-    """
-    Retrieve exact raw content from the L2 archive.
-    
-    Parameters
-    ----------
-    source_file : str
-        Exact filename as stored in the source_file column.
-        
-    Returns
-    -------
-    str
-        Complete raw Markdown content.
-        If the file is not found, returns an error message.
-    """
-    retriever = MemoryRetriever()
-    content = retriever.get_l2_raw(source_file)
-    
-    if content is None:
-        return f"Source file not found: {source_file}"
-    
-    return content
 
 def main():
     parser = argparse.ArgumentParser(description="SQLite memory database retrieval tool")
@@ -100,11 +53,11 @@ def main():
     args = parser.parse_args()
     
     if args.command == "search":
-        result = search_memory_db(args.query, args.limit)
+        result = retrieve_l1_facts(args.query, args.limit)
         print(result)
     
     elif args.command == "read":
-        result = read_archive_db(args.source_file)
+        result = retrieve_l2_raw(args.source_file)
         print(result)
     
     elif args.command == "stats":
@@ -225,8 +178,6 @@ def main():
             elif args.process_file:
                 store_raw = not args.no_store_raw
                 print(f"Processing file: {args.process_file} (store_raw: {store_raw})...")
-                import asyncio
-                from pathlib import Path
                 
                 file_path = Path(args.process_file)
                 if not file_path.is_absolute():

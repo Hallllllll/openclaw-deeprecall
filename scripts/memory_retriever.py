@@ -150,6 +150,21 @@ class MemoryRetriever:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_l2_source ON l2_archive(source_file)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_processed_path ON processed_files(file_path)')
             
+            # Create FTS5 virtual table for full-text search (if FTS5 is available)
+            try:
+                cursor.execute('''
+                    CREATE VIRTUAL TABLE IF NOT EXISTS l1_fts 
+                    USING fts5(
+                        content, 
+                        tags,
+                        content=l1_structured,
+                        content_rowid=id
+                    )
+                ''')
+                print("FTS5 virtual table created/enabled for semantic search")
+            except sqlite3.OperationalError as e:
+                print(f"Note: FTS5 not available, using LIKE-based search: {e}")
+            
             conn.commit()
     
     def search_l1_structured(self, query: str = None, limit: int = 5) -> List[str]:
